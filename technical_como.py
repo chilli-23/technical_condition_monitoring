@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 import traceback
 import openpyxl 
-import requests
+# No 'requests' import needed anymore
 
 # --- Page Configuration ---
 st.set_page_config(layout="wide", initial_sidebar_state="expanded")
@@ -36,7 +36,7 @@ engine = get_engine()
 if engine is None:
     st.stop()
 
-@st.cache_data(ttl=300) # MODIFIED: Cache for 5 mins, not forever
+@st.cache_data(ttl=300) # Cache for 5 mins
 def load_data():
     """Loads data from the database (MODIFIED WITH LIMIT)"""
     try:
@@ -63,49 +63,12 @@ def load_data():
         return pd.DataFrame()
 
 # --- ==================================================================== ---
-# ---     PART 2: THE LOGO-FETCHING LOGIC
+# ---     PART 2: YOUR STREAMLIT APP (Logo logic simplified)
 # --- ==================================================================== ---
 
-@st.cache_data(ttl=3600) # MODIFIED: Cache the image for an hour, not forever
-def get_logo_image():
-    """
-    Fetches the logo image from a private GitHub repo using the API.
-    """
-    # --- CONFIGURE YOUR REPO DETAILS ---
-    OWNER_REPO = "chilli-23/technical_como"  
-    LOGO_PATH = "images/alamtri_logo.jpeg"        
-    # ------------------------------------
-    
-    try:
-        # This reads the NEW secret key you added
-        GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-    except Exception:
-        st.error("GitHub token (GITHUB_TOKEN) not configured in secrets.toml.")
-        return None 
-
-    API_URL = f"https://api.github.com/repos/{OWNER_REPO}/contents/{LOGO_PATH}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3.raw"
-    }
-    
-    try:
-        response = requests.get(API_URL, headers=headers)
-        response.raise_for_status() 
-        return response.content 
-    except requests.exceptions.RequestException as e:
-        st.error(f"Failed to fetch logo from GitHub: {e}")
-        return None 
-
-def display_logo():
-    """Displays the logo image fetched by get_logo_image."""
-    logo_data = get_logo_image()
-    if logo_data:
-        st.image(logo_data, width=80)
-
-# --- ==================================================================== ---
-# ---     PART 3: YOUR STREAMLIT APP (UNCHANGED)
-# --- ==================================================================== ---
+# --- Define the public URL for the logo ---
+# I've converted your GitHub link to the "raw" link so st.image can read it
+LOGO_URL = "https://raw.githubusercontent.com/chilli-23/technical_condition_monitoring/main/alamtri_logo.jpeg"
 
 # --- Sidebar for Navigation ---
 st.sidebar.title("Navigation")
@@ -116,11 +79,11 @@ page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Da
 if page == "Monitoring Dashboard":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        display_logo()  # <-- This is the new part
+        st.image(LOGO_URL, width=80)  # <-- NEW Simple way
     with col2_title:
         st.title("Technical Condition Monitoring Dashboard")
     
-    df = load_data()  # <-- This is your original, working code
+    df = load_data() 
     
     if df.empty:
         st.warning("⚠️ No data available to display. (Or database connection failed)")
@@ -139,7 +102,7 @@ if page == "Monitoring Dashboard":
 
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
-        st.cache_resource.clear() # Clear both caches
+        st.cache_resource.clear() 
         st.rerun()
 
     if point_choices:
@@ -253,7 +216,7 @@ if page == "Monitoring Dashboard":
 elif page == "Upload New Data":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        display_logo()  # <-- This is the new part
+        st.image(LOGO_URL, width=80)  # <-- NEW Simple way
     with col2_title:
         st.title("Upload New Data")
     st.write("Use this page to add new records to the database tables from a CSV or XLSX file.")
@@ -327,7 +290,7 @@ elif page == "Upload New Data":
 elif page == "Database Viewer":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        display_logo()  # <-- This is the new part
+        st.image(LOGO_URL, width=80)  # <-- NEW Simple way
     with col2_title:
         st.title("Database Table Viewer")
     st.write("Select a table from the dropdown to view its entire contents.")
