@@ -1,22 +1,29 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 import traceback
-import openpyxl 
-# No 'requests' import needed anymore
+import plotly.express as px  # <-- ADDED for the new dashboard page
 
 # --- Page Configuration ---
-st.set_page_config(layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(layout="wide")
+
+# --- Placeholder function for the logo ---
+# The new code calls display_logo(), so we must define it.
+# You can replace this placeholder with your actual logo.
+@st.cache_resource
+def display_logo():
+    """Placeholder for the logo display function"""
+    # Example: st.image("your_logo.png", width=100)
+    st.markdown("**(LOGO)**", help="This is a placeholder for the display_logo() function.")
 
 # --- ==================================================================== ---
-# ---     PART 1: YOUR DATABASE LOGIC (WITH TEST LIMITS)
+# ---    PART 1: DATABASE LOGIC
 # --- ==================================================================== ---
 
 @st.cache_resource
 def get_engine():
-    """Creates a cached database engine (YOUR ORIGINAL CODE)"""
+    """Creates a cached database engine"""
     try:
         DB_HOST = st.secrets["database"]["host"]
         DB_PORT = st.secrets["database"]["port"]
@@ -36,7 +43,8 @@ engine = get_engine()
 if engine is None:
     st.stop()
 
-@st.cache_data(ttl=300) # Cache for 5 mins
+# --- THIS IS THE NEW/MODIFIED load_data FUNCTION ---
+@st.cache_data(ttl=300) # MODIFIED: Cache for 5 mins
 def load_data():
     """Loads data from the database (MODIFIED WITH LIMIT)"""
     try:
@@ -54,8 +62,10 @@ def load_data():
                 LIMIT 1000
             """
             df = pd.read_sql(query, connection)
-        df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        df.dropna(subset=['date'], inplace=True)
+            
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            df.dropna(subset=['date'], inplace=True)
         return df
     except Exception as e:
         st.error("Failed to load data from the database.")
@@ -63,12 +73,13 @@ def load_data():
         return pd.DataFrame()
 
 # --- ==================================================================== ---
-# ---     PART 2: YOUR STREAMLIT APP (Logo logic simplified)
+# ---    PART 2: (Original simple test app logic is removed)
 # --- ==================================================================== ---
 
-# --- Define the public URL for the logo ---
-# I've converted your GitHub link to the "raw" link so st.image can read it
-LOGO_URL = "https://raw.githubusercontent.com/chilli-23/technical_condition_monitoring/main/alamtri_logo.jpeg"
+
+# --- ==================================================================== ---
+# ---    PART 3: YOUR STREAMLIT APP (This is the new multi-page logic)
+# --- ==================================================================== ---
 
 # --- Sidebar for Navigation ---
 st.sidebar.title("Navigation")
@@ -79,11 +90,11 @@ page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Da
 if page == "Monitoring Dashboard":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        st.image(LOGO_URL, width=80)  # <-- NEW Simple way
+        display_logo()  # <-- This is the new part
     with col2_title:
         st.title("Technical Condition Monitoring Dashboard")
     
-    df = load_data() 
+    df = load_data()  # <-- This uses the new load_data function
     
     if df.empty:
         st.warning("⚠️ No data available to display. (Or database connection failed)")
@@ -102,7 +113,7 @@ if page == "Monitoring Dashboard":
 
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
-        st.cache_resource.clear() 
+        st.cache_resource.clear() # Clear both caches
         st.rerun()
 
     if point_choices:
@@ -216,7 +227,7 @@ if page == "Monitoring Dashboard":
 elif page == "Upload New Data":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        st.image(LOGO_URL, width=80)  # <-- NEW Simple way
+        display_logo()  # <-- This is the new part
     with col2_title:
         st.title("Upload New Data")
     st.write("Use this page to add new records to the database tables from a CSV or XLSX file.")
@@ -290,7 +301,7 @@ elif page == "Upload New Data":
 elif page == "Database Viewer":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        st.image(LOGO_URL, width=80)  # <-- NEW Simple way
+        display_logo()  # <-- This is the new part
     with col2_title:
         st.title("Database Table Viewer")
     st.write("Select a table from the dropdown to view its entire contents.")
