@@ -241,23 +241,43 @@ elif page == "Upload New Data":
             st.image(logo_bytes, width=150)
     with title_col:
         st.title("Upload New Data")
-        
+
     st.write("Use this page to add new records to the database tables from a CSV or XLSX file.")
-    
+
     table_options = ["data", "alarm_standards", "equipment", "alarm", "component"]
     target_table = st.selectbox("1. Select table to add data to", options=table_options)
-    uploaded_file = st.file_uploader("2. Choose a file (CSV with comma/semicolon delimiter or XLSX)", type=["csv", "xlsx"])
+    uploaded_file = st.file_uploader("2. Choose a file", type=["csv", "xlsx"])
 
     if st.button("3. Upload and Add Data"):
         if uploaded_file is not None and target_table is not None:
             try:
-                # --- MODIFIED SECTION START ---
+                upload_df = None
                 if uploaded_file.name.endswith('.csv'):
-                    # Use sep=None and engine='python' to auto-detect the delimiter
-                    upload_df = pd.read_csv(uploaded_file, sep=None, engine='python')
-                else:
+                    # --- ROBUST CSV READING LOGIC ---
+                    # 1. First, try reading with a comma delimiter.
+                    uploaded_file.seek(0) # Ensure we start reading from the beginning
+                    try:
+                        upload_df = pd.read_csv(uploaded_file, sep=',')
+                        # 2. If it results in only one column, it's likely the wrong delimiter.
+                        if upload_df.shape[1] <= 1:
+                            st.info("Comma delimiter failed, trying semicolon...")
+                            upload_df = None # Reset dataframe
+                    except Exception:
+                        upload_df = None # Parsing failed, reset
+
+                    # 3. If the comma-delimited read failed, try semicolon.
+                    if upload_df is None:
+                        uploaded_file.seek(0) # Rewind the file to read it again
+                        upload_df = pd.read_csv(uploaded_file, sep=';')
+
+                    # 4. If it *still* only has one column, the file is likely malformed.
+                    if upload_df.shape[1] <= 1:
+                        st.error("Upload Failed: Could not correctly parse the CSV file with either a comma or semicolon delimiter. Please check the file.")
+                        st.stop()
+                
+                elif uploaded_file.name.endswith('.xlsx'):
                     upload_df = pd.read_excel(uploaded_file, engine='openpyxl')
-                # --- MODIFIED SECTION END ---
+                # --- END OF ROBUST LOGIC ---
 
                 st.write("Preview of original uploaded data:"); st.dataframe(upload_df.head())
 
@@ -267,7 +287,7 @@ elif page == "Upload New Data":
                     rows_removed = initial_row_count - len(upload_df)
                     if rows_removed > 0:
                         st.warning(f"Found and removed {rows_removed} row(s) with a blank 'identifier'. These rows were not processed.")
-                
+
                 if upload_df.empty:
                     st.error("Upload Failed: After removing blank rows, no valid data remains. Please check your file.")
                     st.stop()
@@ -286,7 +306,7 @@ elif page == "Upload New Data":
                     st.write("**Full list of expected columns:**", sorted(db_cols))
                     st.write("**Full list of your file's columns:**", sorted(upload_cols))
                     st.stop()
-                
+
                 unique_key_map = {'data': 'identifier', 'alarm_standards': 'standard', 'component': 'point'}
                 unique_key = unique_key_map.get(target_table)
                 if unique_key and unique_key in upload_df.columns:
@@ -364,4 +384,3 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
-
