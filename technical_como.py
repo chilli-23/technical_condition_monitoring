@@ -251,7 +251,7 @@ if page == "Monitoring Dashboard":
 elif page == "Upload New Data":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        load_logo_from_repo()()  # <-- This is the new part
+        load_logo_from_repo() # <-- This is the new part
     with col2_title:
         st.title("Upload New Data")
     st.write("Use this page to add new records to the database tables from a CSV or XLSX file.")
@@ -364,5 +364,6 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
 
 
