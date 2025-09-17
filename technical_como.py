@@ -9,20 +9,59 @@ import requests
 # --- Page Configuration ---
 st.set_page_config(layout="wide")
 
-# NEW: Function to load the logo from the private repo
-# --- DEBUGGING VERSION of the function ---
+# --- ==================================================================== ---
+# ---    PART 1: SECRET VALIDATION (INTEGRATED DEBUGGING)
+# --- ==================================================================== ---
+# This block runs first to check if secrets are loaded correctly.
+# If a secret is missing, the app will stop here with a clear error.
+
+with st.expander("🔑 Secrets Loading Status", expanded=True):
+    secrets_ok = True
+    
+    # Test 1: Check for the GitHub Token
+    try:
+        token = st.secrets["GITHUB_PRIVATE_TOKEN"]
+        if token:
+            st.success("✅ GITHUB_PRIVATE_TOKEN found.")
+        else:
+            st.error("❌ GITHUB_PRIVATE_TOKEN is empty.")
+            secrets_ok = False
+    except Exception as e:
+        st.error("❌ FAILED to find GITHUB_PRIVATE_TOKEN.")
+        st.exception(e)
+        secrets_ok = False
+
+    # Test 2: Check for Database secrets
+    try:
+        db_host = st.secrets["database"]["host"]
+        if db_host:
+            st.success("✅ Database credentials found.")
+        else:
+            st.error("❌ Database credentials section is empty.")
+            secrets_ok = False
+    except Exception as e:
+        st.error("❌ FAILED to find database credentials.")
+        st.exception(e)
+        secrets_ok = False
+
+    if not secrets_ok:
+        st.warning("Please check your secrets configuration in the Streamlit Cloud dashboard and reboot the app.")
+        st.stop()
+    else:
+        st.info("All required secrets are loaded successfully. Proceeding to load app.")
+
+# --- ==================================================================== ---
+# ---    PART 2: FUNCTIONS (Logo, Database, Data Loading)
+# --- ==================================================================== ---
+
 @st.cache_data
 def load_logo_from_repo():
-    """Fetches the logo from a private GitHub repo, showing errors."""
+    """Fetches the logo from a private GitHub repo, failing silently if there's an API error."""
     OWNER_REPO = "AlvinWinarta2111/technical_condition_monitoring"
     LOGO_PATH = "images/alamtri_logo.jpeg"
     
-    try:
-        GITHUB_TOKEN = st.secrets["GITHUB_PRIVATE_TOKEN"]
-    except Exception as e:
-        # This will show an error if the secret is still the problem
-        st.error(f"Failed to find Streamlit secret: {e}") 
-        return None
+    # We can now safely assume the secret exists because of the check above.
+    GITHUB_TOKEN = st.secrets["GITHUB_PRIVATE_TOKEN"]
 
     API_URL = f"https://api.github.com/repos/{OWNER_REPO}/contents/{LOGO_PATH}"
     headers = {
@@ -35,16 +74,9 @@ def load_logo_from_repo():
         response.raise_for_status()
         return response.content
     except requests.exceptions.RequestException as e:
-        # This will show an error if the GitHub API call is failing
+        # This will only show an error if the GitHub API call itself fails (e.g., 404 Not Found)
         st.error(f"Failed to fetch logo from GitHub: {e}") 
         return None
-
-# --- Load Logo Once ---
-logo_bytes = load_logo_from_repo()
-
-# --- ==================================================================== ---
-# ---    PART 1: DATABASE LOGIC
-# --- ==================================================================== ---
 
 @st.cache_resource
 def get_engine():
@@ -60,21 +92,15 @@ def get_engine():
             poolclass=NullPool
         )
     except Exception as e:
-        st.error("Database connection failed. Please check your [database] credentials in secrets.toml.")
+        st.error("Database connection failed during engine creation.")
         st.code(traceback.format_exc())
         return None
 
-engine = get_engine()
-if engine is None:
-    st.stop()
-
-# --- THIS IS THE NEW/MODIFIED load_data FUNCTION ---
-@st.cache_data(ttl=300) # MODIFIED: Cache for 5 mins
+@st.cache_data(ttl=300)
 def load_data():
-    """Loads data from the database (MODIFIED WITH LIMIT)"""
+    """Loads data from the database"""
     try:
         with engine.connect() as connection:
-            # MODIFIED QUERY: Added ORDER BY and LIMIT 1000
             query = """
                 SELECT 
                     d.equipment_tag_id, d.equipment_name, d.component, d.point_measurement,
@@ -98,13 +124,18 @@ def load_data():
         return pd.DataFrame()
 
 # --- ==================================================================== ---
-# ---    PART 2: STREAMLIT APP LOGIC
+# ---    PART 3: APP INITIALIZATION & MAIN LOGIC
 # --- ==================================================================== ---
+
+logo_bytes = load_logo_from_repo()
+engine = get_engine()
+if engine is None:
+    st.error("Stopping app because database engine could not be created.")
+    st.stop()
 
 # --- Sidebar for Navigation ---
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Data", "Database Viewer"])
-
 
 # --- PAGE 1: DASHBOARD ---
 if page == "Monitoring Dashboard":
@@ -365,4 +396,3 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
-
