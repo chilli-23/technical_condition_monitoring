@@ -114,7 +114,7 @@ page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Da
 if page == "Monitoring Dashboard":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        display_logo()  # <-- This is the new part
+        load_logo_from_repo()  # <-- This is the new part
     with col2_title:
         st.title("Technical Condition Monitoring Dashboard")
     
@@ -251,7 +251,7 @@ if page == "Monitoring Dashboard":
 elif page == "Upload New Data":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        display_logo()  # <-- This is the new part
+        load_logo_from_repo()()  # <-- This is the new part
     with col2_title:
         st.title("Upload New Data")
     st.write("Use this page to add new records to the database tables from a CSV or XLSX file.")
@@ -325,7 +325,7 @@ elif page == "Upload New Data":
 elif page == "Database Viewer":
     col1_title, col2_title = st.columns([1, 10])
     with col1_title:
-        display_logo()  # <-- This is the new part
+        load_logo_from_repo() # <-- This is the new part
     with col2_title:
         st.title("Database Table Viewer")
     st.write("Select a table from the dropdown to view its entire contents.")
@@ -364,4 +364,5 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
 
