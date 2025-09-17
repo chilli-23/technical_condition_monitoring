@@ -246,12 +246,19 @@ elif page == "Upload New Data":
     
     table_options = ["data", "alarm_standards", "equipment", "alarm", "component"]
     target_table = st.selectbox("1. Select table to add data to", options=table_options)
-    uploaded_file = st.file_uploader("2. Choose a file", type=["csv", "xlsx"])
+    uploaded_file = st.file_uploader("2. Choose a file (CSV with comma/semicolon delimiter or XLSX)", type=["csv", "xlsx"])
 
     if st.button("3. Upload and Add Data"):
         if uploaded_file is not None and target_table is not None:
             try:
-                upload_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, engine='openpyxl')
+                # --- MODIFIED SECTION START ---
+                if uploaded_file.name.endswith('.csv'):
+                    # Use sep=None and engine='python' to auto-detect the delimiter
+                    upload_df = pd.read_csv(uploaded_file, sep=None, engine='python')
+                else:
+                    upload_df = pd.read_excel(uploaded_file, engine='openpyxl')
+                # --- MODIFIED SECTION END ---
+
                 st.write("Preview of original uploaded data:"); st.dataframe(upload_df.head())
 
                 if 'identifier' in upload_df.columns:
@@ -357,3 +364,4 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
