@@ -18,8 +18,9 @@ def load_logo_from_repo():
     
     try:
         GITHUB_TOKEN = st.secrets["GITHUB_PRIVATE_TOKEN"]
-    except Exception:
-        return None # Fail silently if secrets aren't configured
+    except Exception as e:
+        st.error(f"Failed to find Streamlit secret: {e}") # Show the error
+        return None
 
     API_URL = f"https://api.github.com/repos/{OWNER_REPO}/contents/{LOGO_PATH}"
     headers = {
@@ -29,10 +30,11 @@ def load_logo_from_repo():
     
     try:
         response = requests.get(API_URL, headers=headers)
-        response.raise_for_status()
-        return response.content # Return the raw bytes of the image
-    except requests.exceptions.RequestException:
-        return None # Fail silently if the logo can't be fetched
+        response.raise_for_status() # This will raise an error for 4xx or 5xx responses
+        return response.content
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to fetch logo from GitHub: {e}") # Show the error
+        return None
 
 # Logo + Title (UPDATED to load from private repo)
 logo_bytes = load_logo_from_repo()
@@ -364,6 +366,7 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
 
 
 
