@@ -10,18 +10,19 @@ import requests
 st.set_page_config(layout="wide")
 
 # NEW: Function to load the logo from the private repo
+# --- DEBUGGING VERSION of the function ---
 @st.cache_data
 def load_logo_from_repo():
-    """Fetches the logo from a private GitHub repo, failing silently."""
-    # --- CONFIGURE GITHUB REPO DETAILS ---
-    OWNER_REPO = "AlvinWinarta2111/technical_condition_monitoring"    # Format: "YourUsername/YourRepoName"
-    LOGO_PATH = "images/alamtri_logo.jpeg"       # Path to your logo file in the repo
-    # ------------------------------------
+    """Fetches the logo from a private GitHub repo, showing errors."""
+    OWNER_REPO = "AlvinWinarta2111/technical_condition_monitoring"
+    LOGO_PATH = "images/alamtri_logo.jpeg"
     
     try:
         GITHUB_TOKEN = st.secrets["GITHUB_PRIVATE_TOKEN"]
-    except Exception:
-        return None # Fail silently if secrets aren't configured
+    except Exception as e:
+        # This will show an error if the secret is still the problem
+        st.error(f"Failed to find Streamlit secret: {e}") 
+        return None
 
     API_URL = f"https://api.github.com/repos/{OWNER_REPO}/contents/{LOGO_PATH}"
     headers = {
@@ -31,10 +32,12 @@ def load_logo_from_repo():
     
     try:
         response = requests.get(API_URL, headers=headers)
-        response.raise_for_status() # This will raise an error for 4xx or 5xx responses
+        response.raise_for_status()
         return response.content
-    except requests.exceptions.RequestException:
-        return None # Fail silently if the logo can't be fetched
+    except requests.exceptions.RequestException as e:
+        # This will show an error if the GitHub API call is failing
+        st.error(f"Failed to fetch logo from GitHub: {e}") 
+        return None
 
 # --- Load Logo Once ---
 logo_bytes = load_logo_from_repo()
@@ -362,3 +365,4 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
