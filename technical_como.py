@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 import traceback
 import plotly.express as px  # <-- ADDED for the new dashboard page
+import requests
 
 # --- Page Configuration ---
 st.set_page_config(layout="wide")
@@ -366,6 +367,7 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
 
 
 
