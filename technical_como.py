@@ -8,14 +8,38 @@ import plotly.express as px  # <-- ADDED for the new dashboard page
 # --- Page Configuration ---
 st.set_page_config(layout="wide")
 
-# --- Placeholder function for the logo ---
-# The new code calls display_logo(), so we must define it.
-# You can replace this placeholder with your actual logo.
-@st.cache_resource
-def display_logo():
-    """Placeholder for the logo display function"""
-    # Example: st.image("your_logo.png", width=100)
-    st.markdown("**(LOGO)**", help="This is a placeholder for the display_logo() function.")
+# NEW: Function to load the logo from the private repo
+@st.cache_data
+def load_logo_from_repo():
+    # --- CONFIGURE GITHUB REPO DETAILS ---
+    OWNER_REPO = "AlvinWinarta2111/technical_condition_monitoring"    # Format: "YourUsername/YourRepoName"
+    LOGO_PATH = "images/alamtri_logo.jpeg"       # Path to your logo file in the repo
+    # ------------------------------------
+    
+    try:
+        GITHUB_TOKEN = st.secrets["GITHUB_PRIVATE_TOKEN"]
+    except Exception:
+        return None # Fail silently if secrets aren't configured
+
+    API_URL = f"https://api.github.com/repos/{OWNER_REPO}/contents/{LOGO_PATH}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3.raw"
+    }
+    
+    try:
+        response = requests.get(API_URL, headers=headers)
+        response.raise_for_status()
+        return response.content # Return the raw bytes of the image
+    except requests.exceptions.RequestException:
+        return None # Fail silently if the logo can't be fetched
+
+# Logo + Title (UPDATED to load from private repo)
+logo_bytes = load_logo_from_repo()
+logo_col, title_col = st.columns([1, 8])
+with logo_col:
+    if logo_bytes:
+        st.image(logo_bytes, width=150)
 
 # --- ==================================================================== ---
 # ---    PART 1: DATABASE LOGIC
@@ -340,3 +364,4 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
