@@ -3,7 +3,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 import traceback
-import plotly.express as px  # <-- ADDED for the new dashboard page
+import plotly.express as px
 import requests
 
 # --- Page Configuration ---
@@ -12,6 +12,7 @@ st.set_page_config(layout="wide")
 # NEW: Function to load the logo from the private repo
 @st.cache_data
 def load_logo_from_repo():
+    """Fetches the logo from a private GitHub repo, failing silently."""
     # --- CONFIGURE GITHUB REPO DETAILS ---
     OWNER_REPO = "AlvinWinarta2111/technical_condition_monitoring"    # Format: "YourUsername/YourRepoName"
     LOGO_PATH = "images/alamtri_logo.jpeg"       # Path to your logo file in the repo
@@ -19,9 +20,8 @@ def load_logo_from_repo():
     
     try:
         GITHUB_TOKEN = st.secrets["GITHUB_PRIVATE_TOKEN"]
-    except Exception as e:
-        st.error(f"Failed to find Streamlit secret: {e}") # Show the error
-        return None
+    except Exception:
+        return None # Fail silently if secrets aren't configured
 
     API_URL = f"https://api.github.com/repos/{OWNER_REPO}/contents/{LOGO_PATH}"
     headers = {
@@ -33,16 +33,11 @@ def load_logo_from_repo():
         response = requests.get(API_URL, headers=headers)
         response.raise_for_status() # This will raise an error for 4xx or 5xx responses
         return response.content
-    except requests.exceptions.RequestException as e:
-        st.error(f"Failed to fetch logo from GitHub: {e}") # Show the error
-        return None
+    except requests.exceptions.RequestException:
+        return None # Fail silently if the logo can't be fetched
 
-# Logo + Title (UPDATED to load from private repo)
+# --- Load Logo Once ---
 logo_bytes = load_logo_from_repo()
-logo_col, title_col = st.columns([1, 8])
-with logo_col:
-    if logo_bytes:
-        st.image(logo_bytes, width=150)
 
 # --- ==================================================================== ---
 # ---    PART 1: DATABASE LOGIC
@@ -100,12 +95,7 @@ def load_data():
         return pd.DataFrame()
 
 # --- ==================================================================== ---
-# ---    PART 2: (Original simple test app logic is removed)
-# --- ==================================================================== ---
-
-
-# --- ==================================================================== ---
-# ---    PART 3: YOUR STREAMLIT APP (This is the new multi-page logic)
+# ---    PART 2: STREAMLIT APP LOGIC
 # --- ==================================================================== ---
 
 # --- Sidebar for Navigation ---
@@ -115,13 +105,14 @@ page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Da
 
 # --- PAGE 1: DASHBOARD ---
 if page == "Monitoring Dashboard":
-    col1_title, col2_title = st.columns([1, 10])
-    with col1_title:
-        load_logo_from_repo()  # <-- This is the new part
-    with col2_title:
+    logo_col, title_col = st.columns([1, 8])
+    with logo_col:
+        if logo_bytes:
+            st.image(logo_bytes, width=150)
+    with title_col:
         st.title("Technical Condition Monitoring Dashboard")
     
-    df = load_data()  # <-- This uses the new load_data function
+    df = load_data()
     
     if df.empty:
         st.warning("⚠️ No data available to display. (Or database connection failed)")
@@ -130,17 +121,24 @@ if page == "Monitoring Dashboard":
     st.subheader("Filters")
     col1, col2, col3 = st.columns(3)
     with col1:
-        equipment_choice = st.selectbox("Equipment", options=sorted(df["equipment_name"].dropna().unique()))
+        equipment_options = sorted(df["equipment_name"].dropna().unique())
+        equipment_choice = st.selectbox("Equipment", options=equipment_options)
+    
     filtered_by_eq = df[df["equipment_name"] == equipment_choice]
+    
     with col2:
-        component_choice = st.selectbox("Component", options=sorted(filtered_by_eq["component"].dropna().unique()))
+        component_options = sorted(filtered_by_eq["component"].dropna().unique())
+        component_choice = st.selectbox("Component", options=component_options)
+    
     component_df = filtered_by_eq[filtered_by_eq["component"] == component_choice]
+    
     with col3:
-        point_choices = st.multiselect("Measurement Point(s)", options=sorted(component_df["point_measurement"].dropna().unique()))
+        point_options = sorted(component_df["point_measurement"].dropna().unique())
+        point_choices = st.multiselect("Measurement Point(s)", options=point_options)
 
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
-        st.cache_resource.clear() # Clear both caches
+        st.cache_resource.clear()
         st.rerun()
 
     if point_choices:
@@ -178,7 +176,7 @@ if page == "Monitoring Dashboard":
                 line=dict(color=transparent_color, width=1, dash="dot")
             )
             fig.add_annotation(
-                x=row['date'], y=1.05, yref='paper', text=f"{row['note']}<br><b>({row['point_measurement']})</b>",
+                x=row['date'], y=1.05, yref='paper', text=f"<b>{row['note']}</b><br>({row['point_measurement']})",
                 showarrow=False, font=dict(size=10, color=solid_color), xanchor="center", align="center"
             )
         st.plotly_chart(fig, use_container_width=True)
@@ -186,7 +184,7 @@ if page == "Monitoring Dashboard":
         st.subheader("Alarm Standards")
         alarm_cols = ["point_measurement", "equipment_tag_id", "alarm_standard", "excellent", "acceptable", "requires_evaluation", "unacceptable", "unit"]
         alarm_df = filtered_df[alarm_cols].drop_duplicates().reset_index(drop=True)
-        alarm_df.index = range(1, len(alarm_df) + 1)
+        alarm_df.index = alarm_df.index + 1
         st.dataframe(
             alarm_df, use_container_width=True, hide_index=False,
             column_config={
@@ -211,52 +209,44 @@ if page == "Monitoring Dashboard":
 
         st.header("Detailed Historical Data")
         for point in sorted(point_choices):
-            col1_hist, col2_hist = st.columns([2, 1])
-            with col1_hist:
-                st.subheader(f"History for: {point}")
+            st.subheader(f"History for: {point}")
             point_df = filtered_df[filtered_df['point_measurement'] == point].copy()
+            
             if not point_df.empty:
-                min_date, max_date = point_df['date'].min().date(), point_df['date'].max().date()
-                with col2_hist:
-                    selected_date_range = st.date_input(
-                        "Filter date range", value=(min_date, max_date), min_value=min_date,
-                        max_value=max_date, key=f"date_range_{point}", label_visibility="collapsed"
+                hist_cols = ["date", "value", "unit", "status", "note"]
+                historical_df = point_df[hist_cols].sort_values(by="date", ascending=False).reset_index(drop=True)
+                historical_df.index = historical_df.index + 1
+                
+                if not historical_df.empty:
+                    historical_df['date'] = historical_df['date'].dt.strftime('%Y-%m-%d %H:%M')
+                    st.dataframe(
+                        historical_df.style.format({'value': '{:g}'}).applymap(color_status, subset=['status']),
+                        use_container_width=True, hide_index=False,
+                        column_config={
+                            "date": st.column_config.TextColumn(width="small"),
+                            "value": st.column_config.TextColumn(width="small"),
+                            "unit": st.column_config.TextColumn(width="small"),
+                            "status": st.column_config.TextColumn(width="medium"),
+                            "note": st.column_config.TextColumn(width="large"),
+                        }
                     )
-                if len(selected_date_range) == 2:
-                    start_date, end_date = selected_date_range
-                    mask = (point_df['date'].dt.date >= start_date) & (point_df['date'].dt.date <= end_date)
-                    display_df = point_df.loc[mask]
-                    hist_cols = ["date", "value", "unit", "status", "note"]
-                    historical_df = display_df[hist_cols].sort_values(by="date", ascending=False)
-                    if not historical_df.empty:
-                        historical_df['date'] = historical_df['date'].dt.strftime('%Y-%m-%d')
-                        historical_df = historical_df.reset_index(drop=True)
-                        historical_df.index = range(1, len(historical_df) + 1)
-                        st.dataframe(
-                            historical_df.style.format({'value': '{:g}'}).applymap(color_status, subset=['status']),
-                            use_container_width=True, hide_index=False,
-                            column_config={
-                                "date": st.column_config.TextColumn(width="small"),
-                                "value": st.column_config.TextColumn(width="small"),
-                                "unit": st.column_config.TextColumn(width="small"),
-                                "status": st.column_config.TextColumn(width="medium"),
-                                "note": st.column_config.TextColumn(width="large"),
-                            }
-                        )
-                    else: st.info("No data available for the selected date range.")
-                else: st.warning("Please select a valid date range (start and end date).")
-            else: st.info("No historical data to display for this point.")
+                else: 
+                    st.info("No data available for this point.")
+            else: 
+                st.info("No historical data to display for this point.")
             st.markdown("---")
     else:
         st.info("ℹ️ Please select one or more measurement points from the filters above to see the data.")
 
 # --- PAGE 2: UPLOAD DATA ---
 elif page == "Upload New Data":
-    col1_title, col2_title = st.columns([1, 10])
-    with col1_title:
-        load_logo_from_repo() # <-- This is the new part
-    with col2_title:
+    logo_col, title_col = st.columns([1, 8])
+    with logo_col:
+        if logo_bytes:
+            st.image(logo_bytes, width=150)
+    with title_col:
         st.title("Upload New Data")
+        
     st.write("Use this page to add new records to the database tables from a CSV or XLSX file.")
     
     table_options = ["data", "alarm_standards", "equipment", "alarm", "component"]
@@ -326,11 +316,13 @@ elif page == "Upload New Data":
 
 # --- PAGE 3: DATABASE VIEWER ---
 elif page == "Database Viewer":
-    col1_title, col2_title = st.columns([1, 10])
-    with col1_title:
-        load_logo_from_repo() # <-- This is the new part
-    with col2_title:
+    logo_col, title_col = st.columns([1, 8])
+    with logo_col:
+        if logo_bytes:
+            st.image(logo_bytes, width=150)
+    with title_col:
         st.title("Database Table Viewer")
+        
     st.write("Select a table from the dropdown to view its entire contents.")
 
     table_options = ["data", "alarm_standards", "equipment", "alarm", "component"]
@@ -345,30 +337,28 @@ elif page == "Database Viewer":
         def view_table_data(table_name):
             try:
                 with engine.connect() as connection:
-                    if table_name not in table_options: st.error("Invalid table selected."); return pd.DataFrame()
+                    if table_name not in table_options: 
+                        st.error("Invalid table selected.")
+                        return pd.DataFrame()
                     df = pd.read_sql(text(f"SELECT * FROM {table_name}"), connection)
                     
                     if table_name == 'data' and 'date' in df.columns:
-                        df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d')
-
+                        df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
                     return df
             except Exception as e:
-                st.error(f"Failed to load data from table '{table_name}'."); st.code(traceback.format_exc()); return pd.DataFrame()
+                st.error(f"Failed to load data from table '{table_name}'.")
+                st.code(traceback.format_exc())
+                return pd.DataFrame()
         
         table_df = view_table_data(table_to_view)
         
         if not table_df.empty:
             st.info(f"Displaying {len(table_df)} rows from the '{table_to_view}' table.")
             table_df = table_df.reset_index(drop=True)
-            table_df.index = range(1, len(table_df) + 1)
+            table_df.index = table_df.index + 1
             st.dataframe(
-                table_df, use_container_width=True,
+                table_df, use_container_width=True, hide_index=False,
                 column_config={col: st.column_config.TextColumn(width="medium") for col in table_df.columns}
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
-
-
-
-
-
