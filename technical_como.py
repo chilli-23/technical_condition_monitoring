@@ -51,7 +51,6 @@ def get_engine():
             poolclass=NullPool
         )
     except Exception as e:
-        # USER-FRIENDLY ERROR
         st.error("Error: Could Not Connect to Database", icon="🔥")
         st.warning("The application could not establish a connection to the database. This is likely due to incorrect credentials or a network issue.")
         st.info("Please contact the application administrator to verify the database connection settings (host, port, user, etc.) are correct in the deployment secrets.")
@@ -80,11 +79,63 @@ def load_data():
             df.dropna(subset=['date'], inplace=True)
         return df
     except Exception as e:
-        # USER-FRIENDLY ERROR
         st.error("Error: Failed to Load Monitoring Data", icon="📊")
         st.warning("The application connected to the database but failed to retrieve the monitoring data.")
         st.info("This can happen if the database tables (e.g., `data`, `alarm_standards`) have been changed or are missing. Please contact the administrator.")
         return pd.DataFrame()
+
+# --- NEW HELPER FUNCTION FOR COLUMN MAPPING ---
+def map_and_clean_columns(df):
+    """
+    Takes a DataFrame, normalizes its column names, and maps them to the standard database format.
+    Also adds a new 'identifier' column if it doesn't exist.
+    """
+    
+    # This dictionary maps various possible input names to the final database column names.
+    COLUMN_MAPPING = {
+        'identifier': 'identifier',
+        'equipment_tag_id': 'equipment_tag_id',
+        'equipment_name': 'equipment_name',
+        'technology': 'technology',
+        'component': 'component',
+        'key': 'key',
+        'alarm_standard': 'alarm_standard',
+        'date': 'date',
+        'measurement_point': 'point_measurement', # Note the mapping to the correct DB name
+        'value': 'value',
+        'unit': 'unit',
+        'status': 'status',
+        'excellent': 'excellent',
+        'acceptable': 'acceptable',
+        'alarm_yellow_warning': 'alarm_yellow_warning',
+        'unacceptable_alarm': 'unacceptable',
+        'note': 'note',
+    }
+    
+    rename_dict = {}
+    ignored_columns = []
+    
+    for col in df.columns:
+        # Normalize: lowercase, strip whitespace, replace spaces and special chars with underscores
+        normalized_col = str(col).lower().strip().replace(' ', '_').replace('(', '').replace(')', '')
+        
+        if normalized_col in COLUMN_MAPPING:
+            rename_dict[col] = COLUMN_MAPPING[normalized_col]
+        else:
+            ignored_columns.append(col)
+            
+    # Add 'identifier' column with unique values if it wasn't in the original file
+    # We will base it on the index to ensure it's unique for this upload batch
+    if 'identifier' not in rename_dict.values():
+        df['identifier'] = [f"generated_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}_{i}" for i in range(len(df))]
+        st.info("Note: 'identifier' column was not found and has been auto-generated.", icon="🤖")
+
+    df.rename(columns=rename_dict, inplace=True)
+    
+    if ignored_columns:
+        st.warning(f"The following columns were found in the file but will be ignored: {', '.join(ignored_columns)}", icon="⚠️")
+        
+    return df
 
 # --- ==================================================================== ---
 # ---    PART 2: APP INITIALIZATION & MAIN LOGIC
@@ -102,7 +153,7 @@ page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Da
 
 # --- PAGE 1: DASHBOARD ---
 if page == "Monitoring Dashboard":
-    # (This page's logic remains the same as it correctly handles empty data)
+    # (This page's logic remains the same)
     logo_col, title_col = st.columns([1, 8])
     with logo_col:
         if logo_bytes:
@@ -116,6 +167,7 @@ if page == "Monitoring Dashboard":
         st.warning("⚠️ No data available to display. (Or the data failed to load from the database)")
         st.stop()
 
+    # ... (Rest of dashboard code is unchanged) ...
     st.subheader("Filters")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -245,7 +297,7 @@ elif page == "Upload New Data":
     with title_col:
         st.title("Upload New Data")
 
-    st.write("Use this page to add new records to the database tables from a CSV or XLSX file.")
+    st.write("This uploader automatically detects column names and formats.")
 
     table_options = ["data", "alarm_standards", "equipment", "alarm", "component"]
     target_table = st.selectbox("1. Select table to add data to", options=table_options)
@@ -254,7 +306,7 @@ elif page == "Upload New Data":
     if st.button("3. Upload and Add Data"):
         if uploaded_file is not None and target_table is not None:
             try:
-                upload_df = None
+                # --- Step 1: Read the raw file ---
                 if uploaded_file.name.endswith('.csv'):
                     uploaded_file.seek(0)
                     first_line = uploaded_file.readline().decode('utf-8')
@@ -264,56 +316,60 @@ elif page == "Upload New Data":
                     upload_df = pd.read_csv(uploaded_file, sep=delimiter, encoding='utf-8-sig')
                 elif uploaded_file.name.endswith('.xlsx'):
                     upload_df = pd.read_excel(uploaded_file, engine='openpyxl')
+                else:
+                    upload_df = None
 
                 if upload_df is None:
                     st.error("Error: Could not read the uploaded file.", icon="📄")
                     st.stop()
+                
+                # --- Step 2: Map columns to database format ---
+                st.info("Attempting to map file columns to database format...")
+                upload_df = map_and_clean_columns(upload_df)
+                
+                st.write("Preview of data after column mapping:"); st.dataframe(upload_df.head())
 
-                st.write("Preview of original uploaded data:"); st.dataframe(upload_df.head())
-
+                # --- Step 3: Standard data cleaning and validation ---
                 if 'identifier' in upload_df.columns:
-                    initial_row_count = len(upload_df)
+                    # Drop rows that have a completely blank identifier from the start
                     upload_df.dropna(subset=['identifier'], inplace=True)
-                    rows_removed = initial_row_count - len(upload_df)
-                    if rows_removed > 0:
-                        st.warning(f"Note: Found and removed {rows_removed} row(s) with a blank 'identifier'.", icon="🧹")
-
-                if upload_df.empty:
-                    # USER-FRIENDLY ERROR
-                    st.error("Upload Failed: No Valid Data Found", icon="❌")
-                    st.warning("The file you uploaded is either empty or contains only rows with blank identifiers. Please check your file and try again.")
+                else:
+                    st.error("Upload Failed: Critical 'identifier' column is missing after mapping.", icon="❌")
                     st.stop()
-
-                st.info(f"Checking columns for the '{target_table}' table...")
+                
+                if upload_df.empty:
+                    st.error("Upload Failed: No valid data found after initial cleaning.", icon="❌")
+                    st.stop()
+                
+                # --- Step 4: Check if all required DB columns are present ---
+                st.info(f"Verifying required columns for the '{target_table}' table...")
                 with engine.connect() as connection:
                     db_cols = pd.read_sql(text(f"SELECT * FROM {target_table} LIMIT 0"), connection).columns.tolist()
+                
                 upload_cols = upload_df.columns.tolist()
-                
-                upload_cols_to_drop = [col for col in upload_cols if 'Unnamed:' in col]
-                if upload_cols_to_drop:
-                    upload_df.drop(columns=upload_cols_to_drop, inplace=True)
-                    upload_cols = upload_df.columns.tolist()
-                
-                db_cols_set, upload_cols_set = set(db_cols), set(upload_cols)
-                if upload_cols_set != db_cols_set:
-                    # USER-FRIENDLY ERROR
-                    st.error("Upload Failed: Column Mismatch", icon="❌")
-                    st.warning(f"The column names in your file do not exactly match the required columns for the '{target_table}' table. Please compare the lists below and correct your file.")
-                    missing, extra = list(db_cols_set - upload_cols_set), list(upload_cols_set - db_cols_set)
-                    if missing: st.write("**Columns missing from your file:**"); st.json(sorted(missing))
-                    if extra: st.write("**Unexpected columns found in your file:**"); st.json(sorted(extra))
-                    st.stop()
+                missing_cols = set(db_cols) - set(upload_cols)
 
+                if missing_cols:
+                    st.error("Upload Failed: Missing Required Columns", icon="❌")
+                    st.warning(f"Even after mapping, your file is missing the following required columns for the '{target_table}' table.")
+                    st.json(sorted(list(missing_cols)))
+                    st.stop()
+                    
+                # --- Step 5: Filter DataFrame to only include columns that exist in the DB table ---
+                # This prevents errors if the file has extra, un-ignored columns.
+                final_upload_df = upload_df[db_cols]
+                
+                # --- Step 6: Check for duplicates (using the cleaned data) ---
                 unique_key_map = {'data': 'identifier', 'alarm_standards': 'standard', 'component': 'point'}
                 unique_key = unique_key_map.get(target_table)
-                if unique_key and unique_key in upload_df.columns:
+                if unique_key and unique_key in final_upload_df.columns:
                     
                     st.info(f"Validating data types in the '{unique_key}' column...")
-                    upload_df[unique_key] = pd.to_numeric(upload_df[unique_key], errors='coerce')
-                    upload_df.dropna(subset=[unique_key], inplace=True)
+                    final_upload_df[unique_key] = pd.to_numeric(final_upload_df[unique_key], errors='coerce')
+                    final_upload_df.dropna(subset=[unique_key], inplace=True)
 
                     st.info(f"Checking for duplicate '{unique_key}' values in the database...")
-                    upload_ids = upload_df[unique_key].astype(int).tolist()
+                    upload_ids = final_upload_df[unique_key].astype(int).tolist()
                     
                     if upload_ids:
                         with engine.connect() as connection:
@@ -322,22 +378,21 @@ elif page == "Upload New Data":
                         existing_ids = set(existing_ids_df[unique_key])
                         duplicate_ids = [id for id in upload_ids if id in existing_ids]
                         if duplicate_ids:
-                            # USER-FRIENDLY ERROR
                             st.error(f"Upload Failed: {len(duplicate_ids)} Duplicate Entries Found", icon="❌")
                             st.warning(f"Your file contains entries where the '{unique_key}' already exists in the database. Each '{unique_key}' must be unique.")
                             st.info("Please remove or change the following duplicate entries from your file:")
                             st.json(sorted(list(set(duplicate_ids))))
                             st.stop()
 
-                st.info(f"All checks passed. Appending {len(upload_df)} valid rows to '{target_table}'...")
+                # --- Step 7: Append to database ---
+                st.info(f"All checks passed. Appending {len(final_upload_df)} valid rows to '{target_table}'...")
                 with engine.connect() as connection:
-                    upload_df.to_sql(target_table, con=connection, if_exists='append', index=False)
-                st.success(f"Successfully added {len(upload_df)} rows to the '{target_table}' table!", icon="🎉")
+                    final_upload_df.to_sql(target_table, con=connection, if_exists='append', index=False)
+                st.success(f"Successfully added {len(final_upload_df)} rows to the '{target_table}' table!", icon="🎉")
                 st.info("Clearing data cache... The dashboard will show the new data on its next load.")
                 st.cache_data.clear()
 
             except Exception as upload_error:
-                # USER-FRIENDLY ERROR
                 st.error("An Unexpected Error Occurred During Upload", icon="🔥")
                 st.warning("This could be due to issues like incorrect data types in columns (e.g., text in a number-only field) or other hidden formatting problems in your file.")
                 st.info("Please review your file carefully. If the issue persists, show the details below to the app administrator.")
@@ -348,6 +403,7 @@ elif page == "Upload New Data":
 
 # --- PAGE 3: DATABASE VIEWER ---
 elif page == "Database Viewer":
+    # (This page's logic remains the same)
     logo_col, title_col = st.columns([1, 8])
     with logo_col:
         if logo_bytes:
@@ -378,7 +434,6 @@ elif page == "Database Viewer":
                         df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
                     return df
             except Exception as e:
-                # USER-FRIENDLY ERROR
                 st.error(f"Error: Could Not Load Table '{table_name}'", icon="📋")
                 st.warning("The application connected to the database but failed to retrieve data from this specific table.")
                 st.info("This can happen if the table is missing or has been recently changed. Please contact the administrator.")
