@@ -101,7 +101,7 @@ def map_and_clean_columns(df):
         'key': 'key',
         'alarm_standard': 'alarm_standard',
         'date': 'date',
-        'measurement_point': 'point_measurement', # Note the mapping to the correct DB name
+        'point_measurement': 'point_measurement', # Handles "POINT MEASUREMENT"
         'value': 'value',
         'unit': 'unit',
         'status': 'status',
@@ -357,7 +357,7 @@ elif page == "Upload New Data":
                     
                 # --- Step 5: Filter DataFrame to only include columns that exist in the DB table ---
                 # This prevents errors if the file has extra, un-ignored columns.
-                final_upload_df = upload_df[db_cols]
+                final_upload_df = upload_df[[col for col in db_cols if col in upload_df.columns]]
                 
                 # --- Step 6: Check for duplicates (using the cleaned data) ---
                 unique_key_map = {'data': 'identifier', 'alarm_standards': 'standard', 'component': 'point'}
