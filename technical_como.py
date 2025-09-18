@@ -70,7 +70,6 @@ def load_data():
                 LEFT JOIN alarm_standards stds ON d.alarm_standard = stds.standard
                 WHERE d.value IS NOT NULL
                 ORDER BY d.date DESC
-                LIMIT 1000
             """
             df = pd.read_sql(query, connection)
             
@@ -451,3 +450,4 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
