@@ -253,31 +253,25 @@ elif page == "Upload New Data":
             try:
                 upload_df = None
                 if uploaded_file.name.endswith('.csv'):
-                    # --- ROBUST CSV READING LOGIC ---
-                    # 1. First, try reading with a comma delimiter.
-                    uploaded_file.seek(0) # Ensure we start reading from the beginning
-                    try:
-                        upload_df = pd.read_csv(uploaded_file, sep=',')
-                        # 2. If it results in only one column, it's likely the wrong delimiter.
-                        if upload_df.shape[1] <= 1:
-                            st.info("Comma delimiter failed, trying semicolon...")
-                            upload_df = None # Reset dataframe
-                    except Exception:
-                        upload_df = None # Parsing failed, reset
+                    # --- NEW, MORE ROBUST CSV PARSING LOGIC ---
+                    uploaded_file.seek(0)
+                    # Read the first line to detect the delimiter
+                    first_line = uploaded_file.readline().decode('utf-8')
+                    uploaded_file.seek(0)  # Reset file pointer for pandas to read
 
-                    # 3. If the comma-delimited read failed, try semicolon.
-                    if upload_df is None:
-                        uploaded_file.seek(0) # Rewind the file to read it again
-                        upload_df = pd.read_csv(uploaded_file, sep=';')
+                    delimiter = ';' if ';' in first_line else ','
+                    st.info(f"Detected '{delimiter}' as the delimiter.")
+                    
+                    # Use the detected delimiter and handle potential BOM with utf-8-sig
+                    upload_df = pd.read_csv(uploaded_file, sep=delimiter, encoding='utf-8-sig')
 
-                    # 4. If it *still* only has one column, the file is likely malformed.
-                    if upload_df.shape[1] <= 1:
-                        st.error("Upload Failed: Could not correctly parse the CSV file with either a comma or semicolon delimiter. Please check the file.")
-                        st.stop()
-                
                 elif uploaded_file.name.endswith('.xlsx'):
                     upload_df = pd.read_excel(uploaded_file, engine='openpyxl')
-                # --- END OF ROBUST LOGIC ---
+                # --- END OF NEW LOGIC ---
+
+                if upload_df is None:
+                    st.error("Could not read the uploaded file.")
+                    st.stop()
 
                 st.write("Preview of original uploaded data:"); st.dataframe(upload_df.head())
 
@@ -297,6 +291,14 @@ elif page == "Upload New Data":
                     db_cols = pd.read_sql(text(f"SELECT * FROM {target_table} LIMIT 0"), connection).columns.tolist()
                 upload_cols = upload_df.columns.tolist()
                 db_cols_set, upload_cols_set = set(db_cols), set(upload_cols)
+                
+                # Clean up potential unnamed columns from trailing delimiters
+                upload_cols_to_drop = [col for col in upload_cols if 'Unnamed:' in col]
+                if upload_cols_to_drop:
+                    upload_df.drop(columns=upload_cols_to_drop, inplace=True)
+                    upload_cols = upload_df.columns.tolist() # Refresh column list
+                    upload_cols_set = set(upload_cols)
+
                 if upload_cols_set != db_cols_set:
                     st.error(f"Column Mismatch! The file columns do not match the '{target_table}' table.")
                     missing, extra = list(db_cols_set - upload_cols_set), list(upload_cols_set - db_cols_set)
