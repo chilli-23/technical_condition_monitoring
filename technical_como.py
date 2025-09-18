@@ -22,7 +22,6 @@ def load_logo_from_repo():
     try:
         GITHUB_TOKEN = st.secrets["GITHUB_PRIVATE_TOKEN"]
     except KeyError:
-        # Fail silently if the secret is not found
         return None
 
     API_URL = f"https://api.github.com/repos/{OWNER_REPO}/contents/{LOGO_PATH}"
@@ -36,7 +35,6 @@ def load_logo_from_repo():
         response.raise_for_status()
         return response.content
     except requests.exceptions.RequestException:
-        # Fail silently if the API call fails
         return None
 
 @st.cache_resource
@@ -53,8 +51,10 @@ def get_engine():
             poolclass=NullPool
         )
     except Exception as e:
-        st.error("Database connection failed. Please check your [database] credentials.")
-        st.code(traceback.format_exc())
+        # USER-FRIENDLY ERROR
+        st.error("Error: Could Not Connect to Database", icon="🔥")
+        st.warning("The application could not establish a connection to the database. This is likely due to incorrect credentials or a network issue.")
+        st.info("Please contact the application administrator to verify the database connection settings (host, port, user, etc.) are correct in the deployment secrets.")
         return None
 
 @st.cache_data(ttl=300)
@@ -80,8 +80,10 @@ def load_data():
             df.dropna(subset=['date'], inplace=True)
         return df
     except Exception as e:
-        st.error("Failed to load data from the database.")
-        st.code(traceback.format_exc())
+        # USER-FRIENDLY ERROR
+        st.error("Error: Failed to Load Monitoring Data", icon="📊")
+        st.warning("The application connected to the database but failed to retrieve the monitoring data.")
+        st.info("This can happen if the database tables (e.g., `data`, `alarm_standards`) have been changed or are missing. Please contact the administrator.")
         return pd.DataFrame()
 
 # --- ==================================================================== ---
@@ -91,7 +93,7 @@ def load_data():
 logo_bytes = load_logo_from_repo()
 engine = get_engine()
 if engine is None:
-    st.error("Stopping app because database engine could not be created.")
+    st.error("Stopping application because a database connection could not be established.")
     st.stop()
 
 # --- Sidebar for Navigation ---
@@ -100,6 +102,7 @@ page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Da
 
 # --- PAGE 1: DASHBOARD ---
 if page == "Monitoring Dashboard":
+    # (This page's logic remains the same as it correctly handles empty data)
     logo_col, title_col = st.columns([1, 8])
     with logo_col:
         if logo_bytes:
@@ -110,7 +113,7 @@ if page == "Monitoring Dashboard":
     df = load_data()
     
     if df.empty:
-        st.warning("⚠️ No data available to display. (Or database connection failed)")
+        st.warning("⚠️ No data available to display. (Or the data failed to load from the database)")
         st.stop()
 
     st.subheader("Filters")
@@ -253,24 +256,17 @@ elif page == "Upload New Data":
             try:
                 upload_df = None
                 if uploaded_file.name.endswith('.csv'):
-                    # --- NEW, MORE ROBUST CSV PARSING LOGIC ---
                     uploaded_file.seek(0)
-                    # Read the first line to detect the delimiter
                     first_line = uploaded_file.readline().decode('utf-8')
-                    uploaded_file.seek(0)  # Reset file pointer for pandas to read
-
+                    uploaded_file.seek(0)
                     delimiter = ';' if ';' in first_line else ','
                     st.info(f"Detected '{delimiter}' as the delimiter.")
-                    
-                    # Use the detected delimiter and handle potential BOM with utf-8-sig
                     upload_df = pd.read_csv(uploaded_file, sep=delimiter, encoding='utf-8-sig')
-
                 elif uploaded_file.name.endswith('.xlsx'):
                     upload_df = pd.read_excel(uploaded_file, engine='openpyxl')
-                # --- END OF NEW LOGIC ---
 
                 if upload_df is None:
-                    st.error("Could not read the uploaded file.")
+                    st.error("Error: Could not read the uploaded file.", icon="📄")
                     st.stop()
 
                 st.write("Preview of original uploaded data:"); st.dataframe(upload_df.head())
@@ -280,40 +276,45 @@ elif page == "Upload New Data":
                     upload_df.dropna(subset=['identifier'], inplace=True)
                     rows_removed = initial_row_count - len(upload_df)
                     if rows_removed > 0:
-                        st.warning(f"Found and removed {rows_removed} row(s) with a blank 'identifier'. These rows were not processed.")
+                        st.warning(f"Note: Found and removed {rows_removed} row(s) with a blank 'identifier'.", icon="🧹")
 
                 if upload_df.empty:
-                    st.error("Upload Failed: After removing blank rows, no valid data remains. Please check your file.")
+                    # USER-FRIENDLY ERROR
+                    st.error("Upload Failed: No Valid Data Found", icon="❌")
+                    st.warning("The file you uploaded is either empty or contains only rows with blank identifiers. Please check your file and try again.")
                     st.stop()
 
                 st.info(f"Checking columns for the '{target_table}' table...")
                 with engine.connect() as connection:
                     db_cols = pd.read_sql(text(f"SELECT * FROM {target_table} LIMIT 0"), connection).columns.tolist()
                 upload_cols = upload_df.columns.tolist()
-                db_cols_set, upload_cols_set = set(db_cols), set(upload_cols)
                 
-                # Clean up potential unnamed columns from trailing delimiters
                 upload_cols_to_drop = [col for col in upload_cols if 'Unnamed:' in col]
                 if upload_cols_to_drop:
                     upload_df.drop(columns=upload_cols_to_drop, inplace=True)
-                    upload_cols = upload_df.columns.tolist() # Refresh column list
-                    upload_cols_set = set(upload_cols)
-
+                    upload_cols = upload_df.columns.tolist()
+                
+                db_cols_set, upload_cols_set = set(db_cols), set(upload_cols)
                 if upload_cols_set != db_cols_set:
-                    st.error(f"Column Mismatch! The file columns do not match the '{target_table}' table.")
+                    # USER-FRIENDLY ERROR
+                    st.error("Upload Failed: Column Mismatch", icon="❌")
+                    st.warning(f"The column names in your file do not exactly match the required columns for the '{target_table}' table. Please compare the lists below and correct your file.")
                     missing, extra = list(db_cols_set - upload_cols_set), list(upload_cols_set - db_cols_set)
-                    if missing: st.warning("**Columns missing from your file:**"); st.json(sorted(missing))
-                    if extra: st.warning("**Unexpected columns found in your file:**"); st.json(sorted(extra))
-                    st.info("For reference:")
-                    st.write("**Full list of expected columns:**", sorted(db_cols))
-                    st.write("**Full list of your file's columns:**", sorted(upload_cols))
+                    if missing: st.write("**Columns missing from your file:**"); st.json(sorted(missing))
+                    if extra: st.write("**Unexpected columns found in your file:**"); st.json(sorted(extra))
                     st.stop()
 
                 unique_key_map = {'data': 'identifier', 'alarm_standards': 'standard', 'component': 'point'}
                 unique_key = unique_key_map.get(target_table)
                 if unique_key and unique_key in upload_df.columns:
+                    
+                    st.info(f"Validating data types in the '{unique_key}' column...")
+                    upload_df[unique_key] = pd.to_numeric(upload_df[unique_key], errors='coerce')
+                    upload_df.dropna(subset=[unique_key], inplace=True)
+
                     st.info(f"Checking for duplicate '{unique_key}' values in the database...")
-                    upload_ids = upload_df[unique_key].dropna().tolist()
+                    upload_ids = upload_df[unique_key].astype(int).tolist()
+                    
                     if upload_ids:
                         with engine.connect() as connection:
                             query = text(f'SELECT "{unique_key}" FROM "{target_table}" WHERE "{unique_key}" IN :ids')
@@ -321,20 +322,27 @@ elif page == "Upload New Data":
                         existing_ids = set(existing_ids_df[unique_key])
                         duplicate_ids = [id for id in upload_ids if id in existing_ids]
                         if duplicate_ids:
-                            st.error(f"Upload Failed: Found {len(duplicate_ids)} rows in your file where the '{unique_key}' already exists in the database.")
-                            st.warning(f"The '{unique_key}' column must be unique. Please remove or update these rows:")
+                            # USER-FRIENDLY ERROR
+                            st.error(f"Upload Failed: {len(duplicate_ids)} Duplicate Entries Found", icon="❌")
+                            st.warning(f"Your file contains entries where the '{unique_key}' already exists in the database. Each '{unique_key}' must be unique.")
+                            st.info("Please remove or change the following duplicate entries from your file:")
                             st.json(sorted(list(set(duplicate_ids))))
                             st.stop()
 
                 st.info(f"All checks passed. Appending {len(upload_df)} valid rows to '{target_table}'...")
                 with engine.connect() as connection:
                     upload_df.to_sql(target_table, con=connection, if_exists='append', index=False)
-                st.success(f"Successfully added {len(upload_df)} rows to the '{target_table}' table!")
+                st.success(f"Successfully added {len(upload_df)} rows to the '{target_table}' table!", icon="🎉")
                 st.info("Clearing data cache... The dashboard will show the new data on its next load.")
                 st.cache_data.clear()
 
             except Exception as upload_error:
-                st.error("An error occurred during the upload process:"); st.code(traceback.format_exc())
+                # USER-FRIENDLY ERROR
+                st.error("An Unexpected Error Occurred During Upload", icon="🔥")
+                st.warning("This could be due to issues like incorrect data types in columns (e.g., text in a number-only field) or other hidden formatting problems in your file.")
+                st.info("Please review your file carefully. If the issue persists, show the details below to the app administrator.")
+                with st.expander("Show Error Details for Administrator"):
+                    st.code(traceback.format_exc())
         else:
             st.warning("⚠️ Please select a table and upload a file first.")
 
@@ -370,8 +378,10 @@ elif page == "Database Viewer":
                         df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
                     return df
             except Exception as e:
-                st.error(f"Failed to load data from table '{table_name}'.")
-                st.code(traceback.format_exc())
+                # USER-FRIENDLY ERROR
+                st.error(f"Error: Could Not Load Table '{table_name}'", icon="📋")
+                st.warning("The application connected to the database but failed to retrieve data from this specific table.")
+                st.info("This can happen if the table is missing or has been recently changed. Please contact the administrator.")
                 return pd.DataFrame()
         
         table_df = view_table_data(table_to_view)
