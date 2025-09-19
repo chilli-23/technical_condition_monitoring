@@ -56,7 +56,7 @@ def get_engine():
         st.info("Please contact the application administrator to verify the database connection settings (host, port, user, etc.) are correct in the deployment secrets.")
         return None
 
-# --- DATA LOADING FUNCTION (Filters by component, point, and equipments) ---
+# --- DATA LOADING FUNCTION ---
 def load_filtered_data(equipments, component, point):
     """
     Loads data from the database, filtered by component, a single point, across multiple equipments.
@@ -218,7 +218,18 @@ if page == "Monitoring Dashboard":
         color_map = {equip: professional_color_palette[i % len(professional_color_palette)] for i, equip in enumerate(unique_equipments)}
 
         fig = px.line(plot_df, x="date", y="value", color="equipment_name", markers=True, title="Trend Comparison Across Equipment", color_discrete_map=color_map)
-        fig.update_layout(legend_title="Equipment", hovermode="x unified")
+        
+        fig.update_layout(
+            legend_title="Equipment", 
+            hovermode="x unified",
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.2, # Adjust this value to add more or less space below the chart
+                xanchor="center",
+                x=0.5
+            )
+        )
         
         notes_df = plot_df.dropna(subset=['note'])
         notes_df = notes_df[~notes_df['note'].astype(str).str.strip().isin(['', '-'])]
