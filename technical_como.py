@@ -56,10 +56,10 @@ def get_engine():
         st.info("Please contact the application administrator to verify the database connection settings (host, port, user, etc.) are correct in the deployment secrets.")
         return None
 
-# --- REVISED DATA LOADING FUNCTION (Filters by a single measurement type) ---
-def load_filtered_data_by_type(equipments, component, point):
+# --- DATA LOADING FUNCTION (Filters by component, point, and equipments) ---
+def load_filtered_data(equipments, component, point):
     """
-    Loads data from the database, filtered by a single measurement type across multiple equipments.
+    Loads data from the database, filtered by component, a single point, across multiple equipments.
     """
     if not equipments or not component or not point:
         return pd.DataFrame()
@@ -138,7 +138,7 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Data", "Database Viewer"])
 
 # --- ==================================================================== ---
-# ---   PAGE 1: MONITORING DASHBOARD ("POINT-FIRST" LOGIC)
+# ---   PAGE 1: MONITORING DASHBOARD (Component -> Point -> Equipments)
 # --- ==================================================================== ---
 if page == "Monitoring Dashboard":
     logo_col, title_col = st.columns([1, 8])
@@ -147,71 +147,71 @@ if page == "Monitoring Dashboard":
     with title_col:
         st.title("Technical Condition Monitoring Dashboard")
 
-    # --- FILTER FUNCTIONS ---
+    # --- FILTER FUNCTIONS FOR THE NEW HIERARCHY ---
     @st.cache_data(ttl=300)
-    def get_measurement_type_options():
-        """Gets a list of all unique Component - Point combinations."""
+    def get_all_component_options():
+        """Gets a list of all unique components."""
         try:
             with engine.connect() as connection:
-                query = "SELECT DISTINCT component, point_measurement FROM data WHERE component IS NOT NULL AND point_measurement IS NOT NULL ORDER BY component, point_measurement"
-                df = pd.read_sql(query, connection)
-                return [f"{row['component']} - {row['point_measurement']}" for _, row in df.iterrows()]
+                df = pd.read_sql("SELECT DISTINCT component FROM data WHERE component IS NOT NULL ORDER BY component", connection)
+                return df['component'].tolist()
         except Exception:
-            st.error("Could not load measurement type options from database.")
+            st.error("Could not load component options.")
             return []
 
     @st.cache_data(ttl=300)
-    def get_equipment_for_measurement_type(component, point):
-        """Gets equipment that has the selected measurement type."""
+    def get_points_for_component(component):
+        """Gets measurement points available for a given component."""
+        if not component: return []
+        try:
+            with engine.connect() as connection:
+                query = text("SELECT DISTINCT point_measurement FROM data WHERE component = :comp_name AND point_measurement IS NOT NULL ORDER BY point_measurement")
+                df = pd.read_sql(query, connection, params={"comp_name": component})
+                return df['point_measurement'].tolist()
+        except Exception: return []
+        
+    @st.cache_data(ttl=300)
+    def get_equipment_for_filters(component, point):
+        """Gets equipment that has the selected component and point."""
         if not component or not point: return []
         try:
             with engine.connect() as connection:
-                query = text("""
-                    SELECT DISTINCT equipment_name FROM data 
-                    WHERE component = :comp_name AND point_measurement = :point_name AND equipment_name IS NOT NULL 
-                    ORDER BY equipment_name
-                """)
+                query = text("SELECT DISTINCT equipment_name FROM data WHERE component = :comp_name AND point_measurement = :point_name AND equipment_name IS NOT NULL ORDER BY equipment_name")
                 df = pd.read_sql(query, connection, params={"comp_name": component, "point_name": point})
                 return df['equipment_name'].tolist()
         except Exception: return []
 
     # --- Build the filter widgets ---
     st.subheader("Filters")
-    col1, col2 = st.columns(2)
-    
-    selected_component, selected_point = None, None
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        measurement_options = get_measurement_type_options()
-        measurement_type_choice = st.selectbox("1. Select Measurement Type", options=measurement_options, index=0 if measurement_options else None)
+        component_options = get_all_component_options()
+        component_choice = st.selectbox("1. Select Component", options=component_options, index=0 if component_options else None)
 
     with col2:
-        if measurement_type_choice:
-            try:
-                selected_component, selected_point = measurement_type_choice.split(' - ', 1)
-                equipment_options = get_equipment_for_measurement_type(selected_component, selected_point)
-                equipment_choices = st.multiselect("2. Select Equipment(s) to Compare", options=equipment_options)
-            except ValueError:
-                st.warning("Could not parse the selected measurement type.")
-                equipment_choices = []
-        else:
-            equipment_choices = st.multiselect("2. Select Equipment(s) to Compare", options=[], disabled=True)
+        point_options = get_points_for_component(component_choice)
+        point_choice = st.selectbox("2. Select Measurement Point", options=point_options, index=0 if point_options else None)
+
+    with col3:
+        equipment_options = get_equipment_for_filters(component_choice, point_choice)
+        equipment_choices = st.multiselect("3. Select Equipment(s) to Compare", options=equipment_options)
 
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
     # --- LOAD & DISPLAY DATA BASED ON SELECTIONS ---
-    if equipment_choices and selected_component and selected_point:
-        filtered_df = load_filtered_data_by_type(equipment_choices, selected_component, selected_point)
+    if equipment_choices and component_choice and point_choice:
+        filtered_df = load_filtered_data(equipment_choices, component_choice, point_choice)
         
         if filtered_df.empty:
             st.warning("⚠️ No data available for the selected filters.")
             st.stop()
         
-        st.header(f"Comparing: {selected_component} - {selected_point}")
+        st.header(f"Comparing: {component_choice} - {point_choice}")
         
-        # --- Charting Logic (Colors by equipment) ---
+        # --- Charting Logic ---
         professional_color_palette = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
         plot_df = filtered_df.sort_values(by="date")
         unique_equipments = sorted(plot_df['equipment_name'].unique())
@@ -264,7 +264,7 @@ if page == "Monitoring Dashboard":
                 st.info(f"No historical data to display for {equipment}.")
             st.markdown("---")
     else:
-        st.info("ℹ️ Please select a measurement type and at least one equipment to see the data.")
+        st.info("ℹ️ Please select a component, a measurement point, and at least one equipment to see the data.")
 
 # --- ==================================================================== ---
 # ---   PAGE 2: UPLOAD NEW DATA
@@ -325,7 +325,7 @@ elif page == "Upload New Data":
             st.warning("⚠️ Please select a table and upload a file first.")
 
 # --- ==================================================================== ---
-# ---   PAGE 3: DATABASE VIEWER (CORRECTED)
+# ---   PAGE 3: DATABASE VIEWER
 # --- ==================================================================== ---
 elif page == "Database Viewer":
     logo_col, title_col = st.columns([1, 8])
@@ -344,7 +344,6 @@ elif page == "Database Viewer":
         st.rerun()
 
     if table_to_view:
-        # This function and decorator are now correctly indented
         @st.cache_data(ttl=60)
         def view_table_data(table_name):
             try:
