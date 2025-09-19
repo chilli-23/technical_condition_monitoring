@@ -56,12 +56,12 @@ def get_engine():
         st.info("Please contact the application administrator to verify the database connection settings (host, port, user, etc.) are correct in the deployment secrets.")
         return None
 
-# --- DATA LOADING FUNCTION ---
-def load_filtered_data(equipments, component, point):
+# --- FINAL DATA LOADING FUNCTION ---
+def load_filtered_data(component, points, equipments):
     """
-    Loads data from the database, filtered by component, a single point, across multiple equipments.
+    Loads data filtered by component, multiple points, and multiple equipments.
     """
-    if not equipments or not component or not point:
+    if not component or not points or not equipments:
         return pd.DataFrame()
 
     try:
@@ -73,17 +73,17 @@ def load_filtered_data(equipments, component, point):
                     stds.excellent, stds.acceptable, stds.requires_evaluation, stds.unacceptable
                 FROM data d
                 LEFT JOIN alarm_standards stds ON d.alarm_standard = stds.standard
-                WHERE d.equipment_name IN :equipment_names
-                  AND d.component = :component
-                  AND d.point_measurement = :point_name
+                WHERE d.component = :component
+                  AND d.point_measurement IN :points
+                  AND d.equipment_name IN :equipments
                   AND d.value IS NOT NULL
                 ORDER BY d.date DESC
             """)
             
             params = {
-                "equipment_names": tuple(equipments),
                 "component": component,
-                "point_name": point
+                "points": tuple(points),
+                "equipments": tuple(equipments)
             }
             
             df = pd.read_sql(query, connection, params=params)
@@ -138,7 +138,7 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Data", "Database Viewer"])
 
 # --- ==================================================================== ---
-# ---   PAGE 1: MONITORING DASHBOARD (Component -> Point -> Equipments)
+# ---   PAGE 1: MONITORING DASHBOARD (FINAL VERSION)
 # --- ==================================================================== ---
 if page == "Monitoring Dashboard":
     logo_col, title_col = st.columns([1, 8])
@@ -147,7 +147,7 @@ if page == "Monitoring Dashboard":
     with title_col:
         st.title("Technical Condition Monitoring Dashboard")
 
-    # --- FILTER FUNCTIONS FOR THE NEW HIERARCHY ---
+    # --- FILTER FUNCTIONS ---
     @st.cache_data(ttl=300)
     def get_all_component_options():
         """Gets a list of all unique components."""
@@ -171,13 +171,13 @@ if page == "Monitoring Dashboard":
         except Exception: return []
         
     @st.cache_data(ttl=300)
-    def get_equipment_for_filters(component, point):
-        """Gets equipment that has the selected component and point."""
-        if not component or not point: return []
+    def get_equipment_for_component(component):
+        """Gets equipment that has the selected component."""
+        if not component: return []
         try:
             with engine.connect() as connection:
-                query = text("SELECT DISTINCT equipment_name FROM data WHERE component = :comp_name AND point_measurement = :point_name AND equipment_name IS NOT NULL ORDER BY equipment_name")
-                df = pd.read_sql(query, connection, params={"comp_name": component, "point_name": point})
+                query = text("SELECT DISTINCT equipment_name FROM data WHERE component = :comp_name AND equipment_name IS NOT NULL ORDER BY equipment_name")
+                df = pd.read_sql(query, connection, params={"comp_name": component})
                 return df['equipment_name'].tolist()
         except Exception: return []
 
@@ -191,41 +191,45 @@ if page == "Monitoring Dashboard":
 
     with col2:
         point_options = get_points_for_component(component_choice)
-        point_choice = st.selectbox("2. Select Measurement Point", options=point_options, index=0 if point_options else None)
+        point_choices = st.multiselect("2. Select Measurement Point(s)", options=point_options)
 
     with col3:
-        equipment_options = get_equipment_for_filters(component_choice, point_choice)
-        equipment_choices = st.multiselect("3. Select Equipment(s) to Compare", options=equipment_options)
+        equipment_options = get_equipment_for_component(component_choice)
+        equipment_choices = st.multiselect("3. Select Equipment(s)", options=equipment_options)
 
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
     # --- LOAD & DISPLAY DATA BASED ON SELECTIONS ---
-    if equipment_choices and component_choice and point_choice:
-        filtered_df = load_filtered_data(equipment_choices, component_choice, point_choice)
+    if component_choice and point_choices and equipment_choices:
+        filtered_df = load_filtered_data(component_choice, point_choices, equipment_choices)
         
         if filtered_df.empty:
             st.warning("⚠️ No data available for the selected filters.")
             st.stop()
         
-        st.header(f"Comparing: {component_choice} - {point_choice}")
+        st.header(f"Results for Component: {component_choice}")
         
-        # --- Charting Logic ---
+        # --- Charting Logic with Custom Legend ---
         professional_color_palette = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
         plot_df = filtered_df.sort_values(by="date")
-        unique_equipments = sorted(plot_df['equipment_name'].unique())
-        color_map = {equip: professional_color_palette[i % len(professional_color_palette)] for i, equip in enumerate(unique_equipments)}
+        
+        # Create the custom legend label
+        plot_df['legend_label'] = plot_df['point_measurement'] + " - " + plot_df['equipment_name']
+        
+        unique_labels = sorted(plot_df['legend_label'].unique())
+        color_map = {label: professional_color_palette[i % len(professional_color_palette)] for i, label in enumerate(unique_labels)}
 
-        fig = px.line(plot_df, x="date", y="value", color="equipment_name", markers=True, title="Trend Comparison Across Equipment", color_discrete_map=color_map)
+        fig = px.line(plot_df, x="date", y="value", color="legend_label", markers=True, title="Trend Comparison", color_discrete_map=color_map)
         
         fig.update_layout(
-            legend_title="Equipment", 
+            legend_title="Point - Equipment", 
             hovermode="x unified",
             legend=dict(
                 orientation="h",
                 yanchor="top",
-                y=-0.2, # Adjust this value to add more or less space below the chart
+                y=-0.2,
                 xanchor="center",
                 x=0.5
             )
@@ -235,14 +239,14 @@ if page == "Monitoring Dashboard":
         notes_df = notes_df[~notes_df['note'].astype(str).str.strip().isin(['', '-'])]
         
         for _, row in notes_df.iterrows():
-            equip_name = str(row['equipment_name']).strip()
-            line_color = color_map.get(equip_name)
+            label_name = str(row['legend_label']).strip()
+            line_color = color_map.get(label_name)
             solid_color, transparent_color = ('rgb(200,200,200)', 'rgba(200,200,200,0.5)')
             if line_color:
                 r, g, b = tuple(int(line_color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
                 solid_color, transparent_color = (f'rgb({r},{g},{b})', f'rgba({r},{g},{b},0.5)')
             fig.add_shape(type="line", x0=row['date'], y0=0, x1=row['date'], y1=1, yref='paper', line=dict(color=transparent_color, width=1, dash="dot"))
-            fig.add_annotation(x=row['date'], y=1.05, yref='paper', text=f"<b>{row['note']}</b><br>({row['equipment_name']})", showarrow=False, font=dict(size=10, color=solid_color), xanchor="center", align="center")
+            fig.add_annotation(x=row['date'], y=1.05, yref='paper', text=f"<b>{row['note']}</b><br>({row['legend_label']})", showarrow=False, font=dict(size=10, color=solid_color), xanchor="center", align="center")
         st.plotly_chart(fig, use_container_width=True)
 
         # --- Alarm Standards Table ---
@@ -264,18 +268,21 @@ if page == "Monitoring Dashboard":
         st.header("Detailed Historical Data")
         for equipment in sorted(equipment_choices):
             st.subheader(f"History for: {equipment}")
-            point_df = filtered_df[filtered_df['equipment_name'] == equipment]
-            if not point_df.empty:
-                hist_cols = ["date", "value", "unit", "status", "note"]
-                historical_df = point_df[hist_cols].sort_values(by="date", ascending=False).reset_index(drop=True)
-                historical_df.index = historical_df.index + 1
-                historical_df['date'] = historical_df['date'].dt.strftime('%Y-%m-%d %H:%M')
-                st.dataframe(historical_df.style.format({'value': '{:g}'}).applymap(color_status, subset=['status']), use_container_width=True, hide_index=False)
-            else: 
-                st.info(f"No historical data to display for {equipment}.")
+            for point in sorted(point_choices):
+                st.markdown(f"**Measurement Point: {point}**")
+                point_df = filtered_df[(filtered_df['equipment_name'] == equipment) & (filtered_df['point_measurement'] == point)]
+                
+                if not point_df.empty:
+                    hist_cols = ["date", "value", "unit", "status", "note"]
+                    historical_df = point_df[hist_cols].sort_values(by="date", ascending=False).reset_index(drop=True)
+                    historical_df.index = historical_df.index + 1
+                    historical_df['date'] = historical_df['date'].dt.strftime('%Y-%m-%d %H:%M')
+                    st.dataframe(historical_df.style.format({'value': '{:g}'}).applymap(color_status, subset=['status']), use_container_width=True, hide_index=False)
+                else: 
+                    st.info(f"No historical data to display for this point on {equipment}.")
             st.markdown("---")
     else:
-        st.info("ℹ️ Please select a component, a measurement point, and at least one equipment to see the data.")
+        st.info("ℹ️ Please select a component, at least one point, and at least one equipment to see the data.")
 
 # --- ==================================================================== ---
 # ---   PAGE 2: UPLOAD NEW DATA
