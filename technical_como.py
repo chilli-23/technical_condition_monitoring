@@ -204,7 +204,7 @@ if page == "Monitoring Dashboard":
         plot_df = filtered_df.sort_values(by="date")
         fig = px.line(
             plot_df, x="date", y="value", color="point_measurement", markers=True,
-            title="Selected Measurement Points Trend (Last 1000 Records)",
+            title="Selected Measurement Points Trend",
             color_discrete_map=color_map
         )
         fig.update_layout(legend_title="Measurement Point", hovermode="x unified")
@@ -450,4 +450,5 @@ elif page == "Database Viewer":
             )
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
 
