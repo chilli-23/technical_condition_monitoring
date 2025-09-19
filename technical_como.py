@@ -56,7 +56,7 @@ def get_engine():
         st.info("Please contact the application administrator to verify the database connection settings (host, port, user, etc.) are correct in the deployment secrets.")
         return None
 
-# --- REVISED DATA LOADING FUNCTION (Now filters by a single measurement type) ---
+# --- REVISED DATA LOADING FUNCTION (Filters by a single measurement type) ---
 def load_filtered_data_by_type(equipments, component, point):
     """
     Loads data from the database, filtered by a single measurement type across multiple equipments.
@@ -97,7 +97,7 @@ def load_filtered_data_by_type(equipments, component, point):
         st.error("Error: Failed to Load Filtered Monitoring Data", icon="📊")
         return pd.DataFrame()
 
-# --- HELPER FUNCTION FOR COLUMN MAPPING (Unchanged) ---
+# --- HELPER FUNCTION FOR COLUMN MAPPING ---
 def map_and_clean_columns(df):
     COLUMN_MAPPING = {
         'identifier': 'identifier', 'equipment_tag_id': 'equipment_tag_id',
@@ -138,7 +138,7 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Choose a page", ["Monitoring Dashboard", "Upload New Data", "Database Viewer"])
 
 # --- ==================================================================== ---
-# ---   PAGE 1: MONITORING DASHBOARD (REVISED "POINT-FIRST" LOGIC)
+# ---   PAGE 1: MONITORING DASHBOARD ("POINT-FIRST" LOGIC)
 # --- ==================================================================== ---
 if page == "Monitoring Dashboard":
     logo_col, title_col = st.columns([1, 8])
@@ -147,7 +147,7 @@ if page == "Monitoring Dashboard":
     with title_col:
         st.title("Technical Condition Monitoring Dashboard")
 
-    # --- NEW: STEP 1 - REVISED FILTER FUNCTIONS ---
+    # --- FILTER FUNCTIONS ---
     @st.cache_data(ttl=300)
     def get_measurement_type_options():
         """Gets a list of all unique Component - Point combinations."""
@@ -175,11 +175,10 @@ if page == "Monitoring Dashboard":
                 return df['equipment_name'].tolist()
         except Exception: return []
 
-    # --- NEW: Build the filter widgets with the new "Point-first" order ---
+    # --- Build the filter widgets ---
     st.subheader("Filters")
     col1, col2 = st.columns(2)
     
-    # Initialize variables to avoid errors
     selected_component, selected_point = None, None
     
     with col1:
@@ -188,7 +187,6 @@ if page == "Monitoring Dashboard":
 
     with col2:
         if measurement_type_choice:
-            # Safely parse the selected component and point
             try:
                 selected_component, selected_point = measurement_type_choice.split(' - ', 1)
                 equipment_options = get_equipment_for_measurement_type(selected_component, selected_point)
@@ -203,7 +201,7 @@ if page == "Monitoring Dashboard":
         st.cache_data.clear()
         st.rerun()
 
-    # --- STEP 2: LOAD & DISPLAY DATA BASED ON SELECTIONS ---
+    # --- LOAD & DISPLAY DATA BASED ON SELECTIONS ---
     if equipment_choices and selected_component and selected_point:
         filtered_df = load_filtered_data_by_type(equipment_choices, selected_component, selected_point)
         
@@ -213,7 +211,7 @@ if page == "Monitoring Dashboard":
         
         st.header(f"Comparing: {selected_component} - {selected_point}")
         
-        # --- Charting Logic (Now colors by equipment) ---
+        # --- Charting Logic (Colors by equipment) ---
         professional_color_palette = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
         plot_df = filtered_df.sort_values(by="date")
         unique_equipments = sorted(plot_df['equipment_name'].unique())
@@ -269,11 +267,9 @@ if page == "Monitoring Dashboard":
         st.info("ℹ️ Please select a measurement type and at least one equipment to see the data.")
 
 # --- ==================================================================== ---
-# ---   PAGE 2 & 3 are UNCHANGED
+# ---   PAGE 2: UPLOAD NEW DATA
 # --- ==================================================================== ---
-
 elif page == "Upload New Data":
-    # ... (code is unchanged)
     logo_col, title_col = st.columns([1, 8])
     with logo_col:
         if logo_bytes:
@@ -328,19 +324,44 @@ elif page == "Upload New Data":
         else:
             st.warning("⚠️ Please select a table and upload a file first.")
 
+# --- ==================================================================== ---
+# ---   PAGE 3: DATABASE VIEWER (CORRECTED)
+# --- ==================================================================== ---
 elif page == "Database Viewer":
-    # ... (code is unchanged)
     logo_col, title_col = st.columns([1, 8])
     with logo_col:
         if logo_bytes:
             st.image(logo_bytes, width=150)
     with title_col:
         st.title("Database Table Viewer")
+        
     st.write("Select a table from the dropdown to view its entire contents.")
     table_options = ["data", "alarm_standards", "equipment", "alarm", "component"]
     table_to_view = st.selectbox("Choose a table to display", options=table_options)
+
     if st.button("🔄 Refresh Table View"):
         st.cache_data.clear()
         st.rerun()
+
     if table_to_view:
-        @st.cache_
+        # This function and decorator are now correctly indented
+        @st.cache_data(ttl=60)
+        def view_table_data(table_name):
+            try:
+                with engine.connect() as connection:
+                    df = pd.read_sql(text(f"SELECT * FROM {table_name}"), connection)
+                    if table_name == 'data' and 'date' in df.columns:
+                        df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
+                    return df
+            except Exception as e:
+                st.error(f"Error: Could Not Load Table '{table_name}'", icon="📋")
+                return pd.DataFrame()
+        
+        table_df = view_table_data(table_to_view)
+        
+        if not table_df.empty:
+            st.info(f"Displaying {len(table_df)} rows from the '{table_to_view}' table.")
+            table_df.index = table_df.index + 1
+            st.dataframe(table_df, use_container_width=True, hide_index=False)
+        else:
+            st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
