@@ -16,7 +16,7 @@ st.set_page_config(layout="wide")
 @st.cache_data
 def load_logo_from_repo():
     """Fetches the logo from a private GitHub repo, failing silently on any error."""
-    OWNER_REPO = "AlvinWinarta2111/technical_condition_monitoring"
+    OWNER_REPO = "COMOFPM/technical_condition_monitoring" 
     LOGO_PATH = "images/alamtri_logo.jpeg"
     
     try:
@@ -382,3 +382,4 @@ elif page == "Database Viewer":
             st.dataframe(table_df, use_container_width=True, hide_index=False)
         else:
             st.warning(f"The table '{table_to_view}' is empty or could not be loaded.")
+
